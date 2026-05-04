@@ -119,6 +119,53 @@ function printHistory() {
   console.log();
 }
 
+// Phase 6: Résumer la conversation (commande /resume)
+async function resume() {
+  if (history.length <= 1) {
+    console.log('\n📌 Aucune conversation à résumer.\n');
+    return;
+  }
+
+  const conversationText = history
+    .slice(1)  // Ignorer le system prompt
+    .map(m => `${m.role}: ${m.content}`)
+    .join('\n\n');
+
+  const provider = PROVIDERS[currentProvider];
+  const summaryPrompt = `Résume cette conversation en 5 bullet points maximum. Sois concis et pour chaque point commence par un verbe:\n\n${conversationText}`;
+
+  try {
+    console.log('\n⏳ Génération du résumé...');
+    const response = await fetch(provider.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${provider.apiKey}`
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: [
+          { role: 'user', content: summaryPrompt }
+        ],
+        temperature: 0.3,
+        stream: false
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const summary = data.choices[0].message.content;
+      console.log('\n📋 Résumé de la conversation:');
+      console.log(summary);
+      console.log();
+    } else {
+      console.log(`❌ Erreur: ${response.status}\n`);
+    }
+  } catch (e) {
+    console.error(`❌ Erreur résumé: ${e.message}\n`);
+  }
+}
+
 // Phase 4: Changer le provider actif
 function switchProvider(name) {
   const providerName = name.toLowerCase();
@@ -207,9 +254,10 @@ const rl = readline.createInterface({
 });
 
 async function main() {
-  console.log('Chatbot CLI - Phase 5 (compression contexte). (Ctrl+C pour quitter)\n');
+  console.log('Chatbot CLI - Phase 6 (/resume command). (Ctrl+C pour quitter)\n');
   console.log('Commandes spéciales:');
   console.log('  /history        - Afficher l\'historique');
+  console.log('  /resume         - Résumer la conversation');
   console.log('  /provider       - Afficher le provider actuel');
   console.log('  /provider NAME  - Changer de provider (mistral, groq, huggingface)\n');
   console.log(`Note: Compression auto quand historique > ${MAX_HISTORY} messages\n`);
@@ -224,6 +272,12 @@ async function main() {
     // Commande /history
     if (input.trim() === '/history') {
       printHistory();
+      continue;
+    }
+
+    // Phase 6: Commande /resume
+    if (input.trim() === '/resume') {
+      await resume();
       continue;
     }
 
