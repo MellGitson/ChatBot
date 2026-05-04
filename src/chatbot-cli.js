@@ -6,8 +6,23 @@ dotenv.config();
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const MISTRAL_URL = 'https://api.mistral.ai/v1/chat/completions';
 
-// Phase 1: Appel simple sans mémoire
-async function askMistral(userMessage) {
+// Phase 2: Historique côté client
+const history = [
+  {
+    role: 'system',
+    content: 'Tu es un assistant utile et concis. Tu te souviens de tout ce qui a été dit dans cette conversation.'
+  }
+];
+
+// Phase 2: Appel avec mémoire complète
+async function chat(userMessage) {
+  // TODO 1: ajouter le message user à history
+  history.push({
+    role: 'user',
+    content: userMessage
+  });
+
+  // TODO 2: envoyer TOUT l'historique
   const response = await fetch(MISTRAL_URL, {
     method: 'POST',
     headers: {
@@ -16,9 +31,7 @@ async function askMistral(userMessage) {
     },
     body: JSON.stringify({
       model: 'mistral-small-latest',
-      messages: [
-        { role: 'user', content: userMessage }
-      ],
+      messages: history,
       temperature: 0.7
     })
   });
@@ -28,7 +41,25 @@ async function askMistral(userMessage) {
   }
 
   const data = await response.json();
-  return data.choices[0].message.content;
+  const assistantMessage = data.choices[0].message.content;
+
+  // TODO 3: ajouter la réponse de l'assistant à history (APRÈS l'appel)
+  history.push({
+    role: 'assistant',
+    content: assistantMessage
+  });
+
+  return assistantMessage;
+}
+
+// Afficher l'historique compressé
+function printHistory() {
+  console.log('\n📋 Historique:');
+  history.forEach((msg, idx) => {
+    const preview = msg.content.substring(0, 80).replace(/\n/g, ' ');
+    console.log(`  [${idx}] ${msg.role}: ${preview}${msg.content.length > 80 ? '...' : ''}`);
+  });
+  console.log();
 }
 
 function question(prompt) {
@@ -43,7 +74,8 @@ const rl = readline.createInterface({
 });
 
 async function main() {
-  console.log('Chatbot CLI - Phase 1. (Ctrl+C pour quitter)\n');
+  console.log('Chatbot CLI - Phase 2 (avec mémoire). (Ctrl+C pour quitter)\n');
+  console.log('Commandes spéciales: /history\n');
 
   while (true) {
     const input = await question('Vous : ');
@@ -52,8 +84,14 @@ async function main() {
       continue;
     }
 
+    // Commande /history
+    if (input.trim() === '/history') {
+      printHistory();
+      continue;
+    }
+
     try {
-      const reply = await askMistral(input);
+      const reply = await chat(input);
       console.log(`IA : ${reply}\n`);
     } catch (error) {
       console.error(`Erreur : ${error.message}\n`);
