@@ -3,10 +3,31 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
-const MISTRAL_URL = 'https://api.mistral.ai/v1/chat/completions';
+// Phase 4: Configuration multi-provider
+const PROVIDERS = {
+  mistral: {
+    url: 'https://api.mistral.ai/v1/chat/completions',
+    apiKey: process.env.MISTRAL_API_KEY,
+    model: 'mistral-small-latest',
+    name: 'Mistral'
+  },
+  groq: {
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    apiKey: process.env.GROQ_API_KEY,
+    model: 'llama-3.3-70b-versatile',
+    name: 'Groq'
+  },
+  huggingface: {
+    url: 'https://api-inference.huggingface.co/models/meta-llama/Llama-2-7b-chat-hf/v1/chat/completions',
+    apiKey: process.env.HUGGINGFACE_TOKEN,
+    model: 'meta-llama/Llama-2-7b-chat-hf',
+    name: 'HuggingFace'
+  }
+};
 
-// Phase 2: Historique côté client
+let currentProvider = 'mistral';
+
+// Historique côté client
 const history = [
   {
     role: 'system',
@@ -14,33 +35,35 @@ const history = [
   }
 ];
 
-// Phase 3: Appel avec streaming
+// Phase 4: Appel avec streaming et provider configurable
 async function chatStream(userMessage) {
+  const provider = PROVIDERS[currentProvider];
+  
   // Ajouter le message user à history
   history.push({
     role: 'user',
     content: userMessage
   });
 
-  const response = await fetch(MISTRAL_URL, {
+  const response = await fetch(provider.url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${MISTRAL_API_KEY}`
+      'Authorization': `Bearer ${provider.apiKey}`
     },
     body: JSON.stringify({
-      model: 'mistral-small-latest',
+      model: provider.model,
       messages: history,
       temperature: 0.7,
-      stream: true  // Phase 3: Activer le streaming
+      stream: true
     })
   });
 
   if (!response.ok) {
-    throw new Error(`Mistral API error: ${response.status} ${response.statusText}`);
+    throw new Error(`${provider.name} API error: ${response.status} ${response.statusText}`);
   }
 
-  // Phase 3: Lire le stream et accumuler la réponse
+  // Lire le stream et accumuler la réponse
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let fullMessage = '';
@@ -62,7 +85,7 @@ async function chatStream(userMessage) {
           const token = parsed.choices[0].delta.content;
           if (token) {
             fullMessage += token;
-            process.stdout.write(token);  // Phase 3: Afficher au fur et à mesure
+            process.stdout.write(token);
           }
         } catch (e) {
           // Ignorer les erreurs de parse
@@ -71,7 +94,7 @@ async function chatStream(userMessage) {
     }
   }
 
-  // Ajouter la réponse complète à l'historique (APRÈS avoir tout reçu)
+  // Ajouter la réponse complète à l'historique
   history.push({
     role: 'assistant',
     content: fullMessage
@@ -90,6 +113,26 @@ function printHistory() {
   console.log();
 }
 
+// Phase 4: Changer le provider actif
+function switchProvider(name) {
+  const providerName = name.toLowerCase();
+  
+  if (!PROVIDERS[providerName]) {
+    const available = Object.keys(PROVIDERS).join(', ');
+    console.log(`❌ Provider '${providerName}' introuvable. Disponibles: ${available}\n`);
+    return false;
+  }
+
+  if (!PROVIDERS[providerName].apiKey) {
+    console.log(`❌ Clé API manquante pour ${PROVIDERS[providerName].name}\n`);
+    return false;
+  }
+
+  currentProvider = providerName;
+  console.log(`✅ Switched to ${PROVIDERS[providerName].name}\n`);
+  return true;
+}
+
 function question(prompt) {
   return new Promise(resolve => {
     rl.question(prompt, resolve);
@@ -102,8 +145,11 @@ const rl = readline.createInterface({
 });
 
 async function main() {
-  console.log('Chatbot CLI - Phase 3 (avec streaming). (Ctrl+C pour quitter)\n');
-  console.log('Commandes spéciales: /history\n');
+  console.log('Chatbot CLI - Phase 4 (multi-provider). (Ctrl+C pour quitter)\n');
+  console.log('Commandes spéciales:');
+  console.log('  /history        - Afficher l\'historique');
+  console.log('  /provider       - Afficher le provider actuel');
+  console.log('  /provider NAME  - Changer de provider (mistral, groq, huggingface)\n');
 
   while (true) {
     const input = await question('Vous : ');
@@ -118,10 +164,22 @@ async function main() {
       continue;
     }
 
+    // Commande /provider
+    if (input.trim() === '/provider') {
+      console.log(`\n📌 Provider actuel: ${PROVIDERS[currentProvider].name}\n`);
+      continue;
+    }
+
+    // Phase 4: Changer le provider
+    if (input.trim().startsWith('/provider ')) {
+      const providerName = input.trim().slice(9).trim();
+      switchProvider(providerName);
+      continue;
+    }
+
     try {
-      // Phase 3: Utiliser chatStream à la place de chat
       await chatStream(input);
-      console.log('\n');  // Saut de ligne après le stream
+      console.log('\n');
     } catch (error) {
       console.error(`Erreur : ${error.message}\n`);
     }
