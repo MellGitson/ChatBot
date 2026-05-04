@@ -30,6 +30,32 @@ let currentProvider = 'mistral';
 // Phase 5: Limite de messages avant compression
 const MAX_HISTORY = 20;  // Nombre maximal de messages avant compression
 
+// Métriques: Pricing par provider ($/1M tokens)
+const PRICING = {
+  mistral: {
+    input: 0.14,    // $0.14 per 1M input tokens
+    output: 0.42,   // $0.42 per 1M output tokens
+    name: 'Mistral'
+  },
+  groq: {
+    input: 0.00,    // Groq: généralement gratuit
+    output: 0.00,
+    name: 'Groq'
+  },
+  huggingface: {
+    input: 0.00,    // Varie selon le modèle, usage gratuit limité
+    output: 0.00,
+    name: 'HuggingFace'
+  }
+};
+
+// Métriques de session
+let sessionMetrics = {
+  totalTokens: 0,
+  totalCost: 0,
+  requestCount: 0
+};
+
 // Historique côté client
 const history = [
   {
@@ -41,6 +67,7 @@ const history = [
 // Phase 4: Appel avec streaming et provider configurable
 async function chatStream(userMessage) {
   const provider = PROVIDERS[currentProvider];
+  const startTime = Date.now();  // Mesurer la latence
   
   // Ajouter le message user à history
   history.push({
@@ -70,6 +97,8 @@ async function chatStream(userMessage) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let fullMessage = '';
+  let promptTokens = 0;
+  let completionTokens = 0;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -85,6 +114,13 @@ async function chatStream(userMessage) {
 
         try {
           const parsed = JSON.parse(data);
+          
+          // Extraire les tokens si disponibles
+          if (parsed.usage) {
+            promptTokens = parsed.usage.prompt_tokens || 0;
+            completionTokens = parsed.usage.completion_tokens || 0;
+          }
+          
           const token = parsed.choices[0].delta.content;
           if (token) {
             fullMessage += token;
@@ -103,6 +139,23 @@ async function chatStream(userMessage) {
     content: fullMessage
   });
 
+  // Mesurer la latence et calculer les coûts
+  const endTime = Date.now();
+  const duration = endTime - startTime;
+  const totalTokens = promptTokens + completionTokens;
+  
+  // Calculer le coût basé sur les pricing
+  const pricing = PRICING[currentProvider];
+  const cost = (promptTokens * pricing.input / 1000000) + (completionTokens * pricing.output / 1000000);
+  
+  // Mettre à jour les métriques de session
+  sessionMetrics.totalTokens += totalTokens;
+  sessionMetrics.totalCost += cost;
+  sessionMetrics.requestCount += 1;
+
+  // Afficher les métriques
+  printMetrics({ duration, promptTokens, completionTokens, totalTokens, cost });
+
   // Phase 5: Compresser l'historique si trop long
   await compressHistory();
 
@@ -117,6 +170,16 @@ function printHistory() {
     console.log(`  [${idx}] ${msg.role}: ${preview}${msg.content.length > 80 ? '...' : ''}`);
   });
   console.log();
+}
+
+// Afficher les métriques de session
+function printMetrics(requestMetrics) {
+  const { duration, promptTokens, completionTokens, totalTokens, cost } = requestMetrics;
+  
+  console.log(`\n📊 Métriques:`);
+  console.log(`  ⏱️  Latence: ${duration.toFixed(2)}ms`);
+  console.log(`  🔤 Tokens: ${promptTokens} (input) + ${completionTokens} (output) = ${totalTokens} (total)`);
+  console.log(`  💰 Coût: $${cost.toFixed(6)} (session total: $${sessionMetrics.totalCost.toFixed(6)})`);
 }
 
 // Phase 6: Résumer la conversation (commande /resume)
@@ -163,6 +226,51 @@ async function resume() {
     }
   } catch (e) {
     console.error(`❌ Erreur résumé: ${e.message}\n`);
+  }
+}
+
+// Phase 7: Traduire la dernière réponse (commande /translate)
+async function translate(language) {
+  // Trouver le dernier message assistant
+  const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
+  
+  if (!lastAssistantMsg) {
+    console.log('\n📌 Aucune réponse de l\'assistant à traduire.\n');
+    return;
+  }
+
+  const provider = PROVIDERS[currentProvider];
+  const translatePrompt = `Traduis exactement ce texte en ${language}. Préserve tous les formats (markdown, code, etc.). Aucune explication, seulement la traduction:\n\n${lastAssistantMsg.content}`;
+
+  try {
+    console.log('\n⏳ Traduction en cours...');
+    const response = await fetch(provider.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${provider.apiKey}`
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: [
+          { role: 'user', content: translatePrompt }
+        ],
+        temperature: 0.1,  // Très bas pour fidélité
+        stream: false
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const translation = data.choices[0].message.content;
+      console.log(`\n🌐 Traduction en ${language}:`);
+      console.log(translation);
+      console.log();
+    } else {
+      console.log(`❌ Erreur: ${response.status}\n`);
+    }
+  } catch (e) {
+    console.error(`❌ Erreur traduction: ${e.message}\n`);
   }
 }
 
@@ -254,12 +362,14 @@ const rl = readline.createInterface({
 });
 
 async function main() {
-  console.log('Chatbot CLI - Phase 6 (/resume command). (Ctrl+C pour quitter)\n');
+  console.log('Chatbot CLI - Phase 7 (/translate command). (Ctrl+C pour quitter)\n');
   console.log('Commandes spéciales:');
-  console.log('  /history        - Afficher l\'historique');
-  console.log('  /resume         - Résumer la conversation');
-  console.log('  /provider       - Afficher le provider actuel');
-  console.log('  /provider NAME  - Changer de provider (mistral, groq, huggingface)\n');
+  console.log('  /history            - Afficher l\'historique');
+  console.log('  /resume             - Résumer la conversation');
+  console.log('  /translate LANG     - Traduire la dernière réponse (ex: /translate english)');
+  console.log('  /metrics            - Afficher les métriques de session');
+  console.log('  /provider           - Afficher le provider actuel');
+  console.log('  /provider NAME      - Changer de provider (mistral, groq, huggingface)\n');
   console.log(`Note: Compression auto quand historique > ${MAX_HISTORY} messages\n`);
 
   while (true) {
@@ -275,9 +385,25 @@ async function main() {
       continue;
     }
 
+    // Commande /metrics
+    if (input.trim() === '/metrics') {
+      console.log('\n📊 Métriques de session:');
+      console.log(`  Requêtes: ${sessionMetrics.requestCount}`);
+      console.log(`  Tokens totaux: ${sessionMetrics.totalTokens}`);
+      console.log(`  Coût total: $${sessionMetrics.totalCost.toFixed(6)}\n`);
+      continue;
+    }
+
     // Phase 6: Commande /resume
     if (input.trim() === '/resume') {
       await resume();
+      continue;
+    }
+
+    // Phase 7: Commande /translate
+    if (input.trim().startsWith('/translate ')) {
+      const language = input.trim().slice(11).trim();
+      await translate(language);
       continue;
     }
 
