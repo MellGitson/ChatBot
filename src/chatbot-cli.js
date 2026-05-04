@@ -27,6 +27,9 @@ const PROVIDERS = {
 
 let currentProvider = 'mistral';
 
+// Phase 5: Limite de messages avant compression
+const MAX_HISTORY = 20;  // Nombre maximal de messages avant compression
+
 // Historique côté client
 const history = [
   {
@@ -100,6 +103,9 @@ async function chatStream(userMessage) {
     content: fullMessage
   });
 
+  // Phase 5: Compresser l'historique si trop long
+  await compressHistory();
+
   return fullMessage;
 }
 
@@ -133,6 +139,62 @@ function switchProvider(name) {
   return true;
 }
 
+// Phase 5: Compression automatique du contexte
+async function compressHistory() {
+  // Si historique trop long, résumer les anciens messages
+  if (history.length <= MAX_HISTORY) {
+    return;  // Rien à faire
+  }
+
+  console.log(`\n⚠️ Contexte compressé (${history.length} → ${MAX_HISTORY} messages)...`);
+
+  // Garder le system prompt [0]
+  // Résumer les messages [1] à [history.length - 10]
+  // Garder les 10 derniers messages pour contexte frais
+  const keepLast = 10;
+  const endCompress = history.length - keepLast;
+  const messagesToCompress = history.slice(1, endCompress);
+
+  // Créer un résumé des messages compressés
+  const conversationText = messagesToCompress
+    .map(m => `${m.role}: ${m.content}`)
+    .join('\n\n');
+
+  const provider = PROVIDERS[currentProvider];
+  const summaryPrompt = `Résume en 2-3 phrases clés les points importants de cette conversation. Sois concis:\n\n${conversationText}`;
+
+  try {
+    const response = await fetch(provider.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${provider.apiKey}`
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: [
+          { role: 'user', content: summaryPrompt }
+        ],
+        temperature: 0.3,  // Bas pour un résumé déterministe
+        stream: false
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const summary = data.choices[0].message.content;
+
+      // Remplacer l'historique compressé par le résumé
+      history.splice(1, messagesToCompress.length, {
+        role: 'assistant',
+        content: `[Contexte résumé] ${summary}`
+      });
+    }
+  } catch (e) {
+    console.error(`⚠️ Erreur compression: ${e.message}`);
+  }
+}
+
 function question(prompt) {
   return new Promise(resolve => {
     rl.question(prompt, resolve);
@@ -145,11 +207,12 @@ const rl = readline.createInterface({
 });
 
 async function main() {
-  console.log('Chatbot CLI - Phase 4 (multi-provider). (Ctrl+C pour quitter)\n');
+  console.log('Chatbot CLI - Phase 5 (compression contexte). (Ctrl+C pour quitter)\n');
   console.log('Commandes spéciales:');
   console.log('  /history        - Afficher l\'historique');
   console.log('  /provider       - Afficher le provider actuel');
   console.log('  /provider NAME  - Changer de provider (mistral, groq, huggingface)\n');
+  console.log(`Note: Compression auto quand historique > ${MAX_HISTORY} messages\n`);
 
   while (true) {
     const input = await question('Vous : ');
