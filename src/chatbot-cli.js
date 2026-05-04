@@ -14,15 +14,14 @@ const history = [
   }
 ];
 
-// Phase 2: Appel avec mémoire complète
-async function chat(userMessage) {
-  // TODO 1: ajouter le message user à history
+// Phase 3: Appel avec streaming
+async function chatStream(userMessage) {
+  // Ajouter le message user à history
   history.push({
     role: 'user',
     content: userMessage
   });
 
-  // TODO 2: envoyer TOUT l'historique
   const response = await fetch(MISTRAL_URL, {
     method: 'POST',
     headers: {
@@ -32,7 +31,8 @@ async function chat(userMessage) {
     body: JSON.stringify({
       model: 'mistral-small-latest',
       messages: history,
-      temperature: 0.7
+      temperature: 0.7,
+      stream: true  // Phase 3: Activer le streaming
     })
   });
 
@@ -40,16 +40,44 @@ async function chat(userMessage) {
     throw new Error(`Mistral API error: ${response.status} ${response.statusText}`);
   }
 
-  const data = await response.json();
-  const assistantMessage = data.choices[0].message.content;
+  // Phase 3: Lire le stream et accumuler la réponse
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let fullMessage = '';
 
-  // TODO 3: ajouter la réponse de l'assistant à history (APRÈS l'appel)
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const chunk = decoder.decode(value);
+    const lines = chunk.split('\n');
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6);
+        if (data === '[DONE]') continue;
+
+        try {
+          const parsed = JSON.parse(data);
+          const token = parsed.choices[0].delta.content;
+          if (token) {
+            fullMessage += token;
+            process.stdout.write(token);  // Phase 3: Afficher au fur et à mesure
+          }
+        } catch (e) {
+          // Ignorer les erreurs de parse
+        }
+      }
+    }
+  }
+
+  // Ajouter la réponse complète à l'historique (APRÈS avoir tout reçu)
   history.push({
     role: 'assistant',
-    content: assistantMessage
+    content: fullMessage
   });
 
-  return assistantMessage;
+  return fullMessage;
 }
 
 // Afficher l'historique compressé
@@ -74,7 +102,7 @@ const rl = readline.createInterface({
 });
 
 async function main() {
-  console.log('Chatbot CLI - Phase 2 (avec mémoire). (Ctrl+C pour quitter)\n');
+  console.log('Chatbot CLI - Phase 3 (avec streaming). (Ctrl+C pour quitter)\n');
   console.log('Commandes spéciales: /history\n');
 
   while (true) {
@@ -91,8 +119,9 @@ async function main() {
     }
 
     try {
-      const reply = await chat(input);
-      console.log(`IA : ${reply}\n`);
+      // Phase 3: Utiliser chatStream à la place de chat
+      await chatStream(input);
+      console.log('\n');  // Saut de ligne après le stream
     } catch (error) {
       console.error(`Erreur : ${error.message}\n`);
     }
