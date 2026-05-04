@@ -1,0 +1,17 @@
+{
+  "name": "chatbot-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Multi-provider CLI chatbot with memory, streaming, and history",
+  "main": "src/chatbot-cli.js",
+  "scripts": {
+    "start": "node src/chatbot-cli.js",
+    "dev": "node --watch src/chatbot-cli.js"
+  },
+  "keywords": ["chatbot", "cli", "mistral", "groq", "huggingface"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.3.1"
+  }
+}
