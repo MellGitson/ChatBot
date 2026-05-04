@@ -10,11 +10,19 @@
     "api": "node src/api.js",
     "api:dev": "node --watch src/api.js"
   },
-  "keywords": ["chatbot", "cli", "mistral", "groq", "huggingface", "api"],
+  "keywords": [
+    "chatbot",
+    "cli",
+    "mistral",
+    "groq",
+    "huggingface",
+    "api"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "dotenv": "^16.3.1",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "pdfkit": "^0.18.0"
   }
 }

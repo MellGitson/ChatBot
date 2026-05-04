@@ -42,6 +42,8 @@ export class Chatbot {
       }
     ];
     this.metrics = { totalTokens: 0, totalCost: 0, requestCount: 0 };
+    this.requestHistory = [];  // Historique détaillé de chaque request
+    this.createdAt = new Date();
     this.MAX_HISTORY = 20;
   }
 
@@ -92,6 +94,20 @@ export class Chatbot {
     this.metrics.totalTokens += totalTokens;
     this.metrics.totalCost += cost;
     this.metrics.requestCount += 1;
+
+    // Enregistrer dans l'historique des requests
+    this.requestHistory.push({
+      requestNumber: this.metrics.requestCount,
+      userMessage: userMessage,
+      assistantResponse: assistantMessage,
+      provider: this.currentProvider,
+      timestamp: new Date(),
+      duration,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      cost
+    });
 
     // Compresser si nécessaire
     await this.compressHistory();
@@ -159,5 +175,34 @@ export class Chatbot {
   setProvider(provider) {
     if (!PROVIDERS[provider]) throw new Error(`Provider '${provider}' not found`);
     this.currentProvider = provider;
+  }
+
+  getStatistics() {
+    const avgTokensPerRequest = this.metrics.requestCount > 0 
+      ? Math.round(this.metrics.totalTokens / this.metrics.requestCount)
+      : 0;
+    
+    const avgCostPerRequest = this.metrics.requestCount > 0
+      ? this.metrics.totalCost / this.metrics.requestCount
+      : 0;
+
+    const totalDuration = this.requestHistory.reduce((sum, req) => sum + req.duration, 0);
+    const avgDuration = this.metrics.requestCount > 0 
+      ? Math.round(totalDuration / this.metrics.requestCount)
+      : 0;
+
+    return {
+      sessionStart: this.createdAt,
+      sessionDuration: new Date() - this.createdAt,
+      totalRequests: this.metrics.requestCount,
+      totalTokens: this.metrics.totalTokens,
+      totalCost: this.metrics.totalCost,
+      avgTokensPerRequest,
+      avgCostPerRequest,
+      avgDuration,
+      totalDuration,
+      requestHistory: this.requestHistory,
+      currentProvider: this.currentProvider
+    };
   }
 }
