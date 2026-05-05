@@ -1,5 +1,6 @@
 import readline from 'node:readline';
 import dotenv from 'dotenv';
+import { exportStatisticsPDF } from './pdf-export.js';
 
 dotenv.config();
 
@@ -55,6 +56,12 @@ let sessionMetrics = {
   totalCost: 0,
   requestCount: 0
 };
+
+// Historique détaillé des requêtes (pour PDF)
+let requestHistory = [];
+
+// Heure de démarrage de la session
+const sessionStartTime = Date.now();
 
 // Historique côté client
 const history = [
@@ -152,6 +159,20 @@ async function chatStream(userMessage) {
   sessionMetrics.totalTokens += totalTokens;
   sessionMetrics.totalCost += cost;
   sessionMetrics.requestCount += 1;
+
+  // Enregistrer dans l'historique des requests (pour PDF)
+  requestHistory.push({
+    requestNumber: sessionMetrics.requestCount,
+    userMessage: userMessage,
+    assistantResponse: fullMessage,
+    provider: currentProvider,
+    timestamp: new Date(),
+    duration,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    cost
+  });
 
   // Afficher les métriques
   printMetrics({ duration, promptTokens, completionTokens, totalTokens, cost });
@@ -368,6 +389,7 @@ async function main() {
   console.log('  /resume             - Résumer la conversation');
   console.log('  /translate LANG     - Traduire la dernière réponse (ex: /translate english)');
   console.log('  /metrics            - Afficher les métriques de session');
+  console.log('  /export             - Exporter les statistiques en PDF');
   console.log('  /provider           - Afficher le provider actuel');
   console.log('  /provider NAME      - Changer de provider (mistral, groq, huggingface)\n');
   console.log(`Note: Compression auto quand historique > ${MAX_HISTORY} messages\n`);
@@ -404,6 +426,54 @@ async function main() {
     if (input.trim().startsWith('/translate ')) {
       const language = input.trim().slice(11).trim();
       await translate(language);
+      continue;
+    }
+
+    // Phase 9: Commande /export - Exporter les statistiques en PDF
+    if (input.trim() === '/export') {
+      try {
+        const timestamp = new Date().toISOString().split('T')[0];
+        const filename = `chatbot-stats-${timestamp}.pdf`;
+        
+        console.log('\n📄 Génération du rapport PDF...');
+        
+        // Créer l'objet statistiques
+        const avgTokensPerRequest = sessionMetrics.requestCount > 0 
+          ? Math.round(sessionMetrics.totalTokens / sessionMetrics.requestCount)
+          : 0;
+        
+        const avgCostPerRequest = sessionMetrics.requestCount > 0
+          ? sessionMetrics.totalCost / sessionMetrics.requestCount
+          : 0;
+
+        const totalDuration = requestHistory
+          .reduce((sum, req) => sum + req.duration, 0);
+        
+        const avgDuration = sessionMetrics.requestCount > 0 
+          ? Math.round(totalDuration / sessionMetrics.requestCount)
+          : 0;
+
+        const stats = {
+          sessionStart: sessionStartTime,
+          sessionDuration: Date.now() - sessionStartTime,
+          totalRequests: sessionMetrics.requestCount,
+          totalTokens: sessionMetrics.totalTokens,
+          totalCost: sessionMetrics.totalCost,
+          avgTokensPerRequest,
+          avgCostPerRequest,
+          avgDuration,
+          totalDuration,
+          requestHistory: requestHistory,
+          currentProvider
+        };
+
+        // Exporter le PDF
+        await exportStatisticsPDF(stats, filename);
+        
+        console.log(`✅ Rapport généré: ${filename}\n`);
+      } catch (error) {
+        console.error(`❌ Erreur lors de l'export: ${error.message}\n`);
+      }
       continue;
     }
 
